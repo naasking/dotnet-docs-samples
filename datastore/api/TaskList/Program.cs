@@ -14,8 +14,11 @@
 
 using Google.Cloud.Datastore.V1;
 using System;
+using Grpc.Core;
 using System.Linq;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using HigherLogics.Google.Datastore;
 
 namespace GoogleCloudSamples
 {
@@ -27,16 +30,30 @@ namespace GoogleCloudSamples
     class TaskList
     {
         private readonly DatastoreDb _db;
-        private readonly KeyFactory _keyFactory;
+        const string emulatorHost = "localhost";
+        const int emulatorPort = 8081;
+        const string namespaceId = "";
+        //private readonly KeyFactory _keyFactory;
 
         TaskList(string projectId)
         {
             // [START datastore_build_service]
             // Create an authorized Datastore service using Application Default Credentials.
-            _db = DatastoreDb.Create(projectId);
+            var client = DatastoreClient.Create(new Channel(emulatorHost, emulatorPort, ChannelCredentials.Insecure));
+            _db = DatastoreDb.Create(projectId, namespaceId, client);
+            //_db = DatastoreDb.Create(projectId);
             // Create a Key factory to construct keys associated with this project.
-            _keyFactory = _db.CreateKeyFactory("Task");
+            //_keyFactory = _db.CreateKeyFactory("Task");
             // [END datastore_build_service]
+        }
+
+        public class Task
+        {
+            [Key]
+            public long Id { get; set; }
+            public string Description { get; set; }
+            public DateTime Created { get; set; }
+            public bool Done { get; set; }
         }
 
         // [START datastore_add_entity]
@@ -47,18 +64,11 @@ namespace GoogleCloudSamples
         /// <returns>The key of the entity.</returns>
         Key AddTask(string description)
         {
-            Entity task = new Entity()
+            return _db.Insert<Task>(new Task
             {
-                Key = _keyFactory.CreateIncompleteKey(),
-                ["description"] = new Value()
-                {
-                    StringValue = description,
-                    ExcludeFromIndexes = true
-                },
-                ["created"] = DateTime.UtcNow,
-                ["done"] = false
-            };
-            return _db.Insert(task);
+                Description = description,
+                Created = DateTime.UtcNow,
+            });
         }
         // [END datastore_add_entity]
 
@@ -72,10 +82,10 @@ namespace GoogleCloudSamples
         {
             using (var transaction = _db.BeginTransaction())
             {
-                Entity task = transaction.Lookup(_keyFactory.CreateKey(id));
+                var task = transaction.Lookup(id.ToKey<Task>(), new Task());
                 if (task != null)
                 {
-                    task["done"] = true;
+                    task.Done = true;
                     transaction.Update(task);
                 }
                 transaction.Commit();
@@ -88,13 +98,11 @@ namespace GoogleCloudSamples
         /// <summary>
         /// Returns a list of all task entities in ascending order of creation time.
         /// </summary>
-        IEnumerable<Entity> ListTasks()
+        IEnumerable<Task> ListTasks()
         {
-            Query query = new Query("Task")
-            {
-                Order = { { "created", PropertyOrder.Types.Direction.Descending } }
-            };
-            return _db.RunQuery(query).Entities;
+            var query = _db.CreateQuery<Task>();
+                query.Order.Add(nameof(Task.Created), PropertyOrder.Types.Direction.Descending);
+            return _db.RunQuery(query).Entities<Task>();
         }
         // [END datastore_retrieve_entities]
 
@@ -105,19 +113,17 @@ namespace GoogleCloudSamples
         /// <param name="id">The ID of the task entity as given by Key.</param>
         void DeleteTask(long id)
         {
-            _db.Delete(_keyFactory.CreateKey(id));
+            _db.Delete(id.ToKey<Task>());
         }
         // [END datastore_delete_entity]
 
-        static IEnumerable<string> FormatTasks(IEnumerable<Entity> tasks)
+        static IEnumerable<string> FormatTasks(IEnumerable<Task> tasks)
         {
             var results = new List<string>();
-            foreach (Entity task in tasks)
+            foreach (var task in tasks)
             {
-                var note = (bool)task["done"] ? "done" :
-                    $"created {(DateTime)task["created"]}";
-                results.Add($"{task.Key.Path.First().Id} : " +
-                    $"{(string)task["description"]} ({note})");
+                var note = task.Done ? "done" : $"created {(DateTime)task.Created}";
+                results.Add($"{task.Id} : {(string)task.Description} ({note})");
             }
             return results;
         }

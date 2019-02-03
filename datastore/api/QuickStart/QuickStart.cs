@@ -15,18 +15,25 @@
 using System;
 // [START datastore_quickstart]
 using Google.Cloud.Datastore.V1;
+using Grpc.Core;
 
 namespace GoogleCloudSamples
 {
     public class QuickStart
     {
+        const string emulatorHost = "localhost";
+        const int emulatorPort = 8081;
+        const string namespaceId = "";
+
         public static void Main(string[] args)
         {
             // Your Google Cloud Platform project ID
-            string projectId = "YOUR-PROJECT-ID";
+            string projectId = "mappertests";
 
             // Instantiates a client
-            DatastoreDb db = DatastoreDb.Create(projectId);
+            //DatastoreDb db = DatastoreDb.Create(projectId);
+            var client = DatastoreClient.Create(new Channel(emulatorHost, emulatorPort, ChannelCredentials.Insecure));
+            var db = DatastoreDb.Create(projectId, namespaceId, client);
 
             // The kind for the new entity
             string kind = "Task";
