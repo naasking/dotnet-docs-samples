@@ -14,4 +14,9 @@
     <ProjectReference Include="..\TaskList\TaskList.csproj" />
     <ProjectReference Include="..\..\..\testutil\testutil.csproj" />
   </ItemGroup>
+    <ItemGroup>
+      <Reference Include="HigherLogics.Google.Datastore">
+        <HintPath>..\..\..\..\HigherLogics.Google.Datastore\HigherLogics.Google.Datastore\bin\Debug\netstandard2.0\HigherLogics.Google.Datastore.dll</HintPath>
+      </Reference>
+    </ItemGroup>
 </Project>

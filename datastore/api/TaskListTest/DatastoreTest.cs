@@ -14,11 +14,13 @@
 
 using Google.Cloud.Datastore.V1;
 using Google.Protobuf;
+using Grpc.Core;
 using System;
 using System.Linq;
 using System.Collections.Generic;
 using Xunit;
 using System.Threading;
+using HigherLogics.Google.Datastore;
 
 namespace GoogleCloudSamples
 {
@@ -26,7 +28,7 @@ namespace GoogleCloudSamples
     {
         private readonly string _projectId;
         private readonly DatastoreDb _db;
-        private readonly Entity _sampleTask;
+        private readonly Task _sampleTask;
         private readonly KeyFactory _keyFactory;
         private readonly DateTime _includedDate =
             new DateTime(1999, 12, 31, 0, 0, 0, DateTimeKind.Utc);
@@ -42,16 +44,21 @@ namespace GoogleCloudSamples
             // Eventually consistency can take a long time.
             MaxTryCount = 8
         };
+        const string emulatorHost = "localhost";
+        const int emulatorPort = 8081;
+        const string namespaceId = "";
 
         public DatastoreTest()
         {
-            _projectId = Environment.GetEnvironmentVariable("GOOGLE_PROJECT_ID");
-            _db = DatastoreDb.Create(_projectId, TestUtil.RandomName());
+            var client = DatastoreClient.Create(new Channel(emulatorHost, emulatorPort, ChannelCredentials.Insecure));
+            _projectId = "mappertests"; // Environment.GetEnvironmentVariable("GOOGLE_PROJECT_ID");
+            _db = DatastoreDb.Create(_projectId, namespaceId, client);
             _keyFactory = _db.CreateKeyFactory("Task");
-            _sampleTask = new Entity()
+            _sampleTask = new Task()
             {
-                Key = _keyFactory.CreateKey("sampleTask"),
+                Id = "sampleTask",
             };
+            Mapper.Constructor(() => new Task());
         }
 
         public void Dispose()
@@ -84,7 +91,7 @@ namespace GoogleCloudSamples
         public void TestIncompleteKey()
         {
             // [START datastore_incomplete_key]
-            Key incompleteKey = _db.CreateKeyFactory("Task").CreateIncompleteKey();
+            Key incompleteKey = _db.CreateKeyFactory<Task>().CreateIncompleteKey();
             Key key = _db.AllocateId(incompleteKey);
             // [END datastore_incomplete_key]
             Assert.True(IsValidKey(key));
@@ -94,7 +101,7 @@ namespace GoogleCloudSamples
         public void TestNamedKey()
         {
             // [START datastore_named_key]
-            Key key = _db.CreateKeyFactory("Task").CreateKey("sampleTask");
+            Key key = _db.CreateKeyFactory<Task>().CreateKey("sampleTask");
             // [END datastore_named_key]
             Assert.True(IsValidKey(key));
         }
@@ -126,19 +133,49 @@ namespace GoogleCloudSamples
             Assert.Equal(original, _db.Lookup(original.Key));
         }
 
+        private void AssertValidEntity(Task original)
+        {
+            _db.Upsert(original);
+            Assert.Equal(original, _db.Lookup(original.GetKey(), new Task()));
+        }
+
+        class Task : IEquatable<Task>
+        {
+            [System.ComponentModel.DataAnnotations.Key]
+            public string Id { get; set; }
+            public string Category { get; set; }
+            public bool Done { get; set; }
+            public bool Completed { get; set; }
+            public int Priority { get; set; }
+            public string Description { get; set; }
+            public DateTime Created { get; set; }
+            public float PercentComplete { get; set; }
+            public string[] Collaborators { get; set; }
+            public string[] Tags { get; set; }
+
+            public bool Equals(Task other) =>
+                Category == other.Category &&
+                Done == other.Done &&
+                Completed == other.Completed &&
+                Priority == other.Priority &&
+                Description == other.Description &&
+                Created == other.Created &&
+                PercentComplete == other.PercentComplete &&
+                (Collaborators == other.Collaborators || Collaborators.SequenceEqual(other.Collaborators)) &&
+                (Tags == other.Tags || Tags.SequenceEqual(other.Tags));
+        }
+
         [Fact]
         public void TestEntityWithParent()
         {
             // [START datastore_entity_with_parent]
-            Key taskListKey = _db.CreateKeyFactory("TaskList").CreateKey(TestUtil.RandomName());
-            Key taskKey = new KeyFactory(taskListKey, "Task").CreateKey("sampleTask");
-            Entity task = new Entity()
+            var task = new Task
             {
-                Key = taskKey,
-                ["category"] = "Personal",
-                ["done"] = false,
-                ["priority"] = 4,
-                ["description"] = "Learn Cloud Datastore"
+                Id = "sampleTask",
+                Category = "Personal",
+                Done = false,
+                Priority = 4,
+                Description = "Learn Cloud Datastore"
             };
             // [END datastore_entity_with_parent]
             AssertValidEntity(task);
@@ -148,19 +185,15 @@ namespace GoogleCloudSamples
         public void TestProperties()
         {
             // [START datastore_properties]
-            Entity task = new Entity()
+            var task = new Task
             {
-                Key = _db.CreateKeyFactory("Task").CreateKey("sampleTask"),
-                ["category"] = "Personal",
-                ["created"] = new DateTime(1999, 01, 01, 0, 0, 0, DateTimeKind.Utc),
-                ["done"] = false,
-                ["priority"] = 4,
-                ["percent_complete"] = 10.0,
-                ["description"] = new Value()
-                {
-                    StringValue = "Learn Cloud Datastore",
-                    ExcludeFromIndexes = true
-                },
+                Id = "sampleTask",
+                Category = "Personal",
+                Created = new DateTime(1999, 01, 01, 0, 0, 0, DateTimeKind.Utc),
+                Done = false,
+                Priority = 4,
+                PercentComplete = 10.0F,
+                Description = "Learn Cloud Datastore",
             };
             // [END datastore_properties]
             AssertValidEntity(task);
@@ -170,11 +203,11 @@ namespace GoogleCloudSamples
         public void TestArrayValue()
         {
             // [START datastore_array_value]
-            Entity task = new Entity()
+            var task = new Task
             {
-                Key = _db.CreateKeyFactory("Task").CreateKey("sampleTask"),
-                ["collaborators"] = new ArrayValue() { Values = { "alice", "bob" } },
-                ["tags"] = new ArrayValue() { Values = { "fun", "programming" } }
+                Id = "sampleTask",
+                Collaborators = new[] { "alice", "bob" },
+                Tags = new[] { "fun", "programming" },
             };
             // [END datastore_array_value]
             AssertValidEntity(task);
@@ -184,13 +217,13 @@ namespace GoogleCloudSamples
         public void TestBasicEntity()
         {
             // [START datastore_basic_entity]
-            Entity task = new Entity()
+            var task = new Task
             {
-                Key = _db.CreateKeyFactory("Task").CreateKey("sampleTask"),
-                ["category"] = "Personal",
-                ["done"] = false,
-                ["priority"] = 4,
-                ["description"] = "Learn Cloud Datastore"
+                Id = "sampleTask",
+                Category = "Personal",
+                Done = false,
+                Priority = 4,
+                Description = "Learn Cloud Datastore",
             };
             // [END datastore_basic_entity]
             AssertValidEntity(task);
@@ -202,7 +235,7 @@ namespace GoogleCloudSamples
             // [START datastore_upsert]
             _db.Upsert(_sampleTask);
             // [END datastore_upsert]
-            Assert.Equal(_sampleTask, _db.Lookup(_sampleTask.Key));
+            Assert.Equal(_sampleTask, _db.Lookup(_sampleTask.Id.ToKey<Task>(), new Task()));
             // Make sure a second upsert doesn't throw an exception.
             _db.Upsert(_sampleTask);
         }
@@ -242,7 +275,7 @@ namespace GoogleCloudSamples
         {
             _db.Upsert(_sampleTask);
             // [START datastore_lookup]
-            Entity task = _db.Lookup(_sampleTask.Key);
+            var task = _db.Lookup<Task>(_sampleTask.Id.ToKey<Task>());
             // [END datastore_lookup]
             Assert.Equal(_sampleTask, task);
         }
@@ -253,10 +286,10 @@ namespace GoogleCloudSamples
         {
             _db.Upsert(_sampleTask);
             // [START datastore_update]
-            _sampleTask["priority"] = 5;
+            _sampleTask.Priority = 5;
             _db.Update(_sampleTask);
             // [END datastore_update]
-            Assert.Equal(_sampleTask, _db.Lookup(_sampleTask.Key));
+            Assert.Equal(_sampleTask, _db.Lookup<Task>(_sampleTask.Id.ToKey<Task>()));
         }
 
         [Fact]
@@ -264,9 +297,9 @@ namespace GoogleCloudSamples
         {
             _db.Upsert(_sampleTask);
             // [START datastore_delete]
-            _db.Delete(_sampleTask.Key);
+            _db.Delete(_sampleTask);
             // [END datastore_delete]
-            Assert.Null(_db.Lookup(_sampleTask.Key));
+            Assert.Null(_db.Lookup(_sampleTask.Id.ToKey<Task>()));
         }
 
         private Entity[] UpsertBatch(Key taskKey1, Key taskKey2)
@@ -374,7 +407,6 @@ namespace GoogleCloudSamples
                 ["category"] = "Personal",
                 ["done"] = false,
                 ["completed"] = false,
-                ["priority"] = 4,
                 ["created"] = _includedDate,
                 ["percent_complete"] = 10.0,
                 ["description"] = new Value()
@@ -592,7 +624,7 @@ namespace GoogleCloudSamples
             });
         }
 
-        [Fact]
+        [Fact(Skip = "doesn't work on emulator")]
         public void TestNamespaceRunQuery()
         {
             UpsertTaskList();
@@ -1034,10 +1066,10 @@ namespace GoogleCloudSamples
         public void TestTransactionalGetOrCreate()
         {
             // [START datastore_transactional_get_or_create]
-            Entity task;
+            Task task;
             using (var transaction = _db.BeginTransaction())
             {
-                task = transaction.Lookup(_sampleTask.Key);
+                task = transaction.Lookup<Task>(_sampleTask.Id.ToKey<Task>());
                 if (task == null)
                 {
                     transaction.Insert(_sampleTask);
@@ -1045,7 +1077,7 @@ namespace GoogleCloudSamples
                 }
             }
             // [END datastore_transactional_get_or_create]
-            Assert.Equal(_sampleTask, _db.Lookup(_sampleTask.Key));
+            Assert.Equal(_sampleTask, _db.Lookup<Task>(_sampleTask.Id.ToKey<Task>()));
         }
 
         [Fact]
@@ -1114,16 +1146,16 @@ namespace GoogleCloudSamples
         public void TestExplodingProperties()
         {
             // [START datastore_exploding_properties]
-            Entity task = new Entity()
+            var task = new Task()
             {
-                Key = _db.CreateKeyFactory("Task").CreateKey("sampleTask"),
-                ["tags"] = new ArrayValue() { Values = { "fun", "programming", "learn" } },
-                ["collaborators"] = new ArrayValue() { Values = { "alice", "bob", "charlie" } },
-                ["created"] = DateTime.UtcNow
+                Id = "sampleTask",
+                Tags = new[] { "fun", "programming", "learn" },
+                Collaborators = new[] { "alice", "bob", "charlie" },
+                Created = DateTime.UtcNow,
             };
             // [END datastore_exploding_properties]
             // Avoid test failure due to float rounding differences.
-            task["created"] = new DateTime(2016, 8, 12, 9, 0, 0, DateTimeKind.Utc);
+            task.Created = new DateTime(2016, 8, 12, 9, 0, 0, DateTimeKind.Utc);
             AssertValidEntity(task);
         }
     }
